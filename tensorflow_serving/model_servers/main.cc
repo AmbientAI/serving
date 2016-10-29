@@ -43,6 +43,7 @@ limitations under the License.
 #include <memory>
 #include <utility>
 #include <vector>
+#include <ctime>
 
 #include "google/protobuf/wrappers.pb.h"
 #include "grpc++/security/server_credentials.h"
@@ -153,23 +154,35 @@ grpc::Status ToGRPCStatus(const tensorflow::Status& status) {
 
 class PredictionServiceImpl final : public PredictionService::Service {
  public:
-  explicit PredictionServiceImpl(std::unique_ptr<ServerCore> core)
-      : core_(std::move(core)) {}
+  explicit PredictionServiceImpl(int print_frequency, std::unique_ptr<ServerCore> core)
+      : print_frequency(print_frequency), core_(std::move(core)) {
+    request_cnt = 0;
+  }
 
   grpc::Status Predict(ServerContext* context, const PredictRequest* request,
                        PredictResponse* response) override {
-    return ToGRPCStatus(
-        TensorflowPredictImpl::Predict(core_.get(), *request, response));
+
+    clock_t start = std::clock();
+    const tensorflow::Status& status = TensorflowPredictImpl::Predict(core_.get(), *request, response);
+    clock_t end = std::clock();
+    
+    if (print_frequency != -1 && request_cnt % print_frequency == 0) {
+        LOG(INFO) << "Request took " << (end - start) / float(CLOCKS_PER_SEC) << "s";
+    }
+    request_cnt = (request_cnt + 1) % print_frequency;
+    return ToGRPCStatus(status);
   }
 
  private:
   std::unique_ptr<ServerCore> core_;
+  int print_frequency;
+  int request_cnt;
 };
 
-void RunServer(int port, std::unique_ptr<ServerCore> core) {
+void RunServer(int port, int print_frequency, std::unique_ptr<ServerCore> core) {
   // "0.0.0.0" is the way to listen on localhost in gRPC.
   const string server_address = "0.0.0.0:" + std::to_string(port);
-  PredictionServiceImpl service(std::move(core));
+  PredictionServiceImpl service(print_frequency, std::move(core));
   ServerBuilder builder;
   std::shared_ptr<grpc::ServerCredentials> creds = InsecureServerCredentials();
   builder.AddListeningPort(server_address, creds);
@@ -184,14 +197,18 @@ void RunServer(int port, std::unique_ptr<ServerCore> core) {
 int main(int argc, char** argv) {
   tensorflow::int32 port = 8500;
   bool enable_batching = false;
+  tensorflow::int32 print_frequency = -1;
+
   tensorflow::string model_name = "default";
   tensorflow::string model_base_path;
   std::vector<tensorflow::Flag> flag_list = {
       tensorflow::Flag("port", &port, "port to listen on"),
+      tensorflow::Flag("print_frequency", &print_frequency, "how often should stats be printed"),
       tensorflow::Flag("enable_batching", &enable_batching, "enable batching"),
       tensorflow::Flag("model_name", &model_name, "name of model"),
       tensorflow::Flag("model_base_path", &model_base_path,
                        "path to export (required)")};
+
   string usage = tensorflow::Flags::Usage(argv[0], flag_list);
   const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
   if (!parse_result || model_base_path.empty()) {
@@ -225,7 +242,7 @@ int main(int argc, char** argv) {
                         std::placeholders::_1, std::placeholders::_2),
       &CreateServableStateMonitor, &LoadCustomModelConfig,
       std::move(core_config), &core));
-  RunServer(port, std::move(core));
+  RunServer(port, print_frequency, std::move(core));
 
   return 0;
 }
