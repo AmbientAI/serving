@@ -4,10 +4,7 @@ package(
     default_visibility = [
         "//tensorflow_serving:internal",
     ],
-    features = [
-        "-layering_check",
-        "-parse_headers",
-    ],
+    features = ["-layering_check"],
 )
 
 licenses(["notice"])  # Apache 2.0
@@ -148,9 +145,12 @@ cc_library(
         "//visibility:public",
     ],
     deps = [
+        ":loader",
         ":servable_data",
         ":source",
+        ":storage_path",
         ":target",
+        "//tensorflow_serving/util:class_registration",
         "@org_tensorflow//tensorflow/core:lib",
     ],
 )
@@ -217,6 +217,35 @@ cc_test(
         ":servable_data",
         ":source",
         ":static_source_router",
+        ":storage_path",
+        ":target",
+        "//tensorflow_serving/core/test_util:mock_storage_path_target",
+        "//tensorflow_serving/core/test_util:test_main",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@org_tensorflow//tensorflow/core:test",
+    ],
+)
+
+cc_library(
+    name = "dynamic_source_router",
+    hdrs = ["dynamic_source_router.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":source_router",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@org_tensorflow//tensorflow/core:tensorflow",
+    ],
+)
+
+cc_test(
+    name = "dynamic_source_router_test",
+    srcs = ["dynamic_source_router_test.cc"],
+    deps = [
+        ":dynamic_source_router",
+        ":servable_data",
+        ":source",
         ":storage_path",
         ":target",
         "//tensorflow_serving/core/test_util:mock_storage_path_target",
@@ -387,6 +416,7 @@ cc_library(
         ":loader",
         ":servable_id",
         "//tensorflow_serving/util:optional",
+        "//tensorflow_serving/util:retrier",
         "@org_tensorflow//tensorflow/core:lib",
     ],
 )
@@ -483,7 +513,7 @@ cc_test(
     srcs = ["aspired_versions_manager_test.cc"],
     deps = [
         ":aspired_versions_manager",
-        ":eager_load_policy",
+        ":availability_preserving_policy",
         ":servable_state_monitor",
         "//tensorflow_serving/core/test_util:availability_test_util",
         "//tensorflow_serving/core/test_util:fake_loader",
@@ -584,6 +614,7 @@ cc_test(
 
 cc_library(
     name = "aspired_version_policy",
+    srcs = ["aspired_version_policy.cc"],
     hdrs = ["aspired_version_policy.h"],
     visibility = [
         "//visibility:public",
@@ -593,6 +624,18 @@ cc_library(
         ":servable_id",
         "//tensorflow_serving/util:optional",
         "@org_tensorflow//tensorflow/core:lib",
+    ],
+)
+
+cc_test(
+    name = "aspired_version_policy_test",
+    srcs = ["aspired_version_policy_test.cc"],
+    deps = [
+        ":aspired_version_policy",
+        ":loader_harness",
+        ":servable_id",
+        "//tensorflow_serving/core/test_util:test_main",
+        "//tensorflow_serving/util:optional",
     ],
 )
 
@@ -645,6 +688,54 @@ cc_test(
 )
 
 cc_library(
+    name = "availability_preserving_policy",
+    srcs = ["availability_preserving_policy.cc"],
+    hdrs = ["availability_preserving_policy.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":aspired_version_policy",
+        ":loader_harness",
+        "//tensorflow_serving/util:optional",
+    ],
+)
+
+cc_test(
+    name = "availability_preserving_policy_test",
+    srcs = ["availability_preserving_policy_test.cc"],
+    deps = [
+        ":availability_preserving_policy",
+        ":servable_id",
+        "//tensorflow_serving/core/test_util:test_main",
+    ],
+)
+
+cc_library(
+    name = "resource_preserving_policy",
+    srcs = ["resource_preserving_policy.cc"],
+    hdrs = ["resource_preserving_policy.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":aspired_version_policy",
+        ":loader_harness",
+        "//tensorflow_serving/util:optional",
+    ],
+)
+
+cc_test(
+    name = "resource_preserving_policy_test",
+    srcs = ["resource_preserving_policy_test.cc"],
+    deps = [
+        ":resource_preserving_policy",
+        ":servable_id",
+        "//tensorflow_serving/core/test_util:test_main",
+    ],
+)
+
+cc_library(
     name = "load_servables_fast",
     srcs = ["load_servables_fast.cc"],
     hdrs = ["load_servables_fast.h"],
@@ -655,5 +746,118 @@ cc_library(
         ":aspired_versions_manager",
         ":servable_state_monitor",
         "@org_tensorflow//tensorflow/core:lib",
+    ],
+)
+
+cc_library(
+    name = "log_collector",
+    srcs = ["log_collector.cc"],
+    hdrs = ["log_collector.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//tensorflow_serving/config:log_collector_config_proto",
+        "@org_tensorflow//tensorflow/core:lib",
+    ],
+)
+
+cc_test(
+    name = "log_collector_test",
+    srcs = ["log_collector_test.cc"],
+    deps = [
+        ":log_collector",
+        "//tensorflow_serving/core/test_util:test_main",
+    ],
+)
+
+load("//tensorflow_serving:serving.bzl", "serving_proto_library")
+
+serving_proto_library(
+    name = "logging_proto",
+    srcs = ["logging.proto"],
+    cc_api_version = 2,
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        "//tensorflow_serving/apis:model_proto",
+        "//tensorflow_serving/config:logging_config_proto",
+    ],
+)
+
+cc_library(
+    name = "request_logger",
+    srcs = ["request_logger.cc"],
+    hdrs = ["request_logger.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":log_collector",
+        ":logging_proto",
+        "//tensorflow_serving/config:logging_config_proto",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "request_logger_test",
+    size = "small",
+    srcs = ["request_logger_test.cc"],
+    deps = [
+        ":log_collector",
+        ":logging_proto",
+        ":request_logger",
+        "//tensorflow_serving/apis:model_proto",
+        "//tensorflow_serving/apis:predict_proto",
+        "//tensorflow_serving/config:logging_config_proto",
+        "//tensorflow_serving/core/test_util:mock_log_collector",
+        "//tensorflow_serving/core/test_util:mock_request_logger",
+        "//tensorflow_serving/core/test_util:test_main",
+        "//tensorflow_serving/test_util",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@protobuf//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "server_request_logger",
+    srcs = ["server_request_logger.cc"],
+    hdrs = ["server_request_logger.h"],
+    visibility = [
+        "//visibility:public",
+    ],
+    deps = [
+        ":request_logger",
+        "//tensorflow_serving/apis:model_proto",
+        "//tensorflow_serving/config:logging_config_proto",
+        "//tensorflow_serving/core:logging_proto",
+        "//tensorflow_serving/util:fast_read_dynamic_ptr",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@protobuf//:protobuf",
+    ],
+)
+
+cc_test(
+    name = "server_request_logger_test",
+    size = "small",
+    srcs = ["server_request_logger_test.cc"],
+    deps = [
+        ":log_collector",
+        ":logging_proto",
+        ":request_logger",
+        ":server_request_logger",
+        "//tensorflow_serving/apis:model_proto",
+        "//tensorflow_serving/apis:predict_proto",
+        "//tensorflow_serving/config:logging_config_proto",
+        "//tensorflow_serving/core/test_util:fake_log_collector",
+        "//tensorflow_serving/core/test_util:mock_log_collector",
+        "//tensorflow_serving/core/test_util:mock_request_logger",
+        "//tensorflow_serving/core/test_util:test_main",
+        "//tensorflow_serving/test_util",
+        "@org_tensorflow//tensorflow/core:lib",
+        "@protobuf//:protobuf",
     ],
 )

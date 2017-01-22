@@ -25,6 +25,8 @@ limitations under the License.
 namespace tensorflow {
 namespace serving {
 
+// Deprecated. Use AvailabilityPreservePolicy instead.
+//
 // AspiredVersionPolicy that loads any aspired versions of a servable before
 // unloading any no-longer-aspired versions.
 //
