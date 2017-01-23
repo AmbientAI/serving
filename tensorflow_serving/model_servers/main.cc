@@ -150,7 +150,7 @@ class PredictionServiceImpl final : public PredictionService::Service {
       : print_frequency(print_frequency), core_(std::move(core)),
         predictor_(new TensorflowPredictor(use_saved_model)) {
     // Track request counts to print every print_frequency
-    request_cnt = 0    
+    request_cnt = 0;
   }
 
   grpc::Status Predict(ServerContext* context, const PredictRequest* request,
@@ -173,11 +173,12 @@ class PredictionServiceImpl final : public PredictionService::Service {
 
  private:
   std::unique_ptr<ServerCore> core_;
+  std::unique_ptr<TensorflowPredictor> predictor_;
   int print_frequency;
   int request_cnt;
 };
 
-void RunServer(int port, std::unique_ptr<ServerCore> core,
+void RunServer(int port, int print_frequency, std::unique_ptr<ServerCore> core,
                bool use_saved_model) {
   // "0.0.0.0" is the way to listen on localhost in gRPC.
   const string server_address = "0.0.0.0:" + std::to_string(port);
